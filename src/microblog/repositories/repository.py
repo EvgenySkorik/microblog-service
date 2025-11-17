@@ -1,7 +1,8 @@
 from datetime import datetime
-from typing import TypeVar
+from typing import TypeVar, List
 
 import aiofiles
+from fastapi import UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -68,7 +69,7 @@ class UserRepository(BaseRepository[User], IUserRepository):
             .options(selectinload(User.followers), selectinload(User.following))
             .where(User.api_key == api_key)
         )
-        logger.debug("Запрос пользователя по ключю к БД")
+        logger.debug("Запрос пользователя по ключу к БД")
 
         return result.scalar_one_or_none()
 
@@ -128,7 +129,12 @@ class TweetRepository(BaseRepository[Tweet], ITweetRepository):
         super().__init__(session, Tweet)
         self.user_repo = UserRepository(session)
 
-    async def create_tweet(self, user: User, data: str, media_ids=None):
+    async def create_tweet(
+            self,
+            user: User,
+            data: str,
+            media_ids: list[int] | None = None
+    ) -> int:
         """Создание твита в БД"""
         tweet: Tweet = await self.create(
             content=data, created_at=datetime.now(), author_id=user.id
@@ -148,7 +154,7 @@ class TweetRepository(BaseRepository[Tweet], ITweetRepository):
 
         return tweet.id
 
-    async def get_tweets(self, user: User, all_tweets: bool):
+    async def get_tweets(self, user: User, all_tweets: bool) -> List[TweetShemaOut]:
         """Получение серриализованного списка твитов из БД,
         его сортировка по подписчикам при all_tweets=False"""
         query = select(Tweet).options(
@@ -180,7 +186,7 @@ class TweetRepository(BaseRepository[Tweet], ITweetRepository):
 
         return tweets_shema
 
-    async def delete_tweet(self, user: User, tweet_id: int):
+    async def delete_tweet(self, user: User, tweet_id: int) -> bool:
         """Удаление твита из БД"""
         tweet = await self.get_by_id(tweet_id)
         if not tweet:
@@ -189,7 +195,7 @@ class TweetRepository(BaseRepository[Tweet], ITweetRepository):
 
         return await self.delete(tweet_id) if user.id == tweet.author_id else False
 
-    async def like_tweet(self, user: User, tweet_id: int):
+    async def like_tweet(self, user: User, tweet_id: int) -> bool:
         """Добавление записи о лайке в БД"""
         await self.session.refresh(user, ["liked_tweets"])
         tweet = await self.get_by_id(tweet_id)
@@ -228,9 +234,8 @@ class MediaRepository(BaseRepository[Media], IMediaRepository):
 
     def __init__(self, session: AsyncSession):
         super().__init__(session, Media)
-        self.user_repo = UserRepository(session)
 
-    async def upload_media(self, user: User, file):
+    async def upload_media(self, user: User, file: UploadFile):
         """Добавление медиа в БД"""
 
         unique_filename = await self._validate_and_save_file(file, user.id)
